@@ -1,0 +1,142 @@
+name: Build RisingOS GSI (Android 16)
+
+on:
+  workflow_dispatch:
+  branches:
+      - main
+
+env:
+  WORKDIR: rising
+  THREADS: 16
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      # -----------------------------
+      # Checkout (not strictly needed, but good practice)
+      # -----------------------------
+      - name: Checkout workflow repo
+        uses: actions/checkout@v4
+
+      # -----------------------------
+      # Install dependencies
+      # -----------------------------
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git-core gnupg flex bison build-essential zip curl \
+            zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 \
+            lib32ncurses6 lib32z1-dev libgl1-mesa-dev \
+            libxml2-utils xsltproc unzip fontconfig \
+            python-is-python3 lzop xz-utils
+
+      # -----------------------------
+      # Setup repo tool
+      # -----------------------------
+      - name: Install repo tool
+        run: |
+          mkdir -p ~/bin
+          curl -s https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod +x ~/bin/repo
+          echo "$HOME/bin" >> $GITHUB_PATH
+
+      # -----------------------------
+      # Create directory (mkdir rising)
+      # -----------------------------
+      - name: Create build directory
+        run: |
+          mkdir -p $WORKDIR
+
+      # -----------------------------
+      # repo init (exact README command)
+      # -----------------------------
+      - name: Repo init RisingOS
+        run: |
+          cd $WORKDIR
+          repo init -u https://github.com/RisingOS-Revived/android \
+            -b sixteen --git-lfs --depth=1
+
+      # -----------------------------
+      # repo sync (exact flags)
+      # -----------------------------
+      - name: Repo sync
+        run: |
+          cd $WORKDIR
+          repo sync -c --no-clone-bundle --no-tags \
+            --optimized-fetch --prune --force-sync -j$THREADS
+
+      # -----------------------------
+      # Clone required treble repos (exact list)
+      # -----------------------------
+      - name: Clone treble repositories
+        run: |
+          cd $WORKDIR
+
+          git clone https://github.com/TrebleDroid/vendor_interfaces \
+            -b android-15.0 vendor/interfaces
+
+          git clone https://github.com/Doze-off/device_phh_treble \
+            -b android-16 device/phh/treble
+
+          git clone https://github.com/TrebleDroid/treble_app \
+            -b master treble_app
+
+          git clone https://github.com/AndyCGYan/android_packages_apps_QcRilAm \
+            -b master packages/apps/QcRilAm
+
+          git clone https://github.com/TrebleDroid/vendor_hardware_overlay \
+            -b pie vendor/hardware_overlay
+
+          git clone https://android.googlesource.com/platform/prebuilts/vndk/v28 \
+            prebuilts/vndk/v28
+
+          git clone https://android.googlesource.com/platform/prebuilts/vndk/v29 \
+            prebuilts/vndk/v29
+
+          git clone https://github.com/ponces/treble_adapter \
+            -b master treble_adapter
+
+          git clone https://github.com/ayusc/treble-patches \
+            -b sixteen patches
+
+      # -----------------------------
+      # Move patches + apply-patches.sh (exact README)
+      # -----------------------------
+      - name: Apply treble patches
+        run: |
+          cd $WORKDIR
+
+          cp -r patches/* .
+          bash apply-patches.sh . || true
+
+      # -----------------------------
+      # Build systemimage
+      # -----------------------------
+      - name: Build RisingOS GSI
+        run: |
+          cd $WORKDIR
+          source build/envsetup.sh
+          lunch rising_gsi-userdebug
+          make systemimage -j$THREADS
+
+      # -----------------------------
+      # Compress system.img (exact README)
+      # -----------------------------
+      - name: Compress system image
+        run: |
+          cd $WORKDIR
+          xz -9 -T0 -v -z \
+            out/target/product/tdgsi_arm64_ab/system.img
+
+      # -----------------------------
+      # Upload artifact
+      # -----------------------------
+      - name: Upload system image
+        uses: actions/upload-artifact@v4
+        with:
+          name: RisingOS-GSI-system.img.xz
+          path: |
+            rising/out/target/product/tdgsi_arm64_ab/system.img.xz
