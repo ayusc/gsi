@@ -2,8 +2,6 @@ name: Build RisingOS GSI (Android 16)
 
 on:
   workflow_dispatch:
-  branches:
-      - sixteen
 
 env:
   WORKDIR: rising
